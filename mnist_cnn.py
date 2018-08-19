@@ -2,19 +2,21 @@ import tensorflow as tf
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
+from collections import defaultdict
 
 FLAGS = tf.app.flags.FLAGS
+SPEC_SENTINEL = "*"
 
 def init_flags():
     tf.app.flags.DEFINE_integer('input_dim', 28, "Image Dimension")
-    tf.app.flags.DEFINE_integer('output_dim', 9, "Image Dimension")
-    tf.app.flags.DEFINE_integer('num_epochs', 500, "Number of epochs")
-    tf.app.flags.DEFINE_integer('batch_size', 16, "Number of samples per batch.")
+    tf.app.flags.DEFINE_integer('output_dim', 10, "Image Dimension")
+    tf.app.flags.DEFINE_integer('num_epochs', 10, "Number of epochs")
+    tf.app.flags.DEFINE_integer('batch_size', 128, "Number of samples per batch.")
     tf.app.flags.DEFINE_integer('nb_batch_per_epoch', 100, "Number of batches per epoch")
     tf.app.flags.DEFINE_float('learning_rate', 1E-4, "Learning rate used for AdamOptimizer")
 
-    tf.app.flags.DEFINE_string('model_dir', '../../models', "Output folder where checkpoints are dumped.")
-    tf.app.flags.DEFINE_string('log_dir', '../../logs', "Logs for tensorboard.")
+    tf.app.flags.DEFINE_string('model_dir', './models', "Output folder where checkpoints are dumped.")
+    tf.app.flags.DEFINE_string('log_dir', './logs', "Logs for tensorboard.")
 
 class NetworkBuilder:
 
@@ -52,15 +54,19 @@ class NetworkBuilder:
         return fc
 
 class Dataset:
-    def __init__(self, csv_path, test_size=0.2):
+    def __init__(self, csv_path, spec, test_size=0.2):
         frame = pd.read_csv(csv_path)
         self.train, self.validation = train_test_split(frame, test_size=test_size)
+        for col in frame:
+            col_func = spec[col] if col in spec else spec[SPEC_SENTINEL]
+            col.apply(lambda x: col_func(x))
+
         self.train_x, self.train_y, self.test_x, self.test_y = [], [], [], []
+
 
 
 class CNNModel:
     def __init__(self):
-        init_flags()
         self.input = tf.placeholder(tf.float32, shape=[None, FLAGS.input_dim, FLAGS.img.dim], name="input_image")
         self.output = tf.placeholder(tf.int32, shape=[None, FLAGS.output_dim], name="output")
         nb = NetworkBuilder(self.input)
@@ -93,11 +99,11 @@ class CNNModel:
                     end = current_batch + FLAGS.batch_size
                     batch_x = np.array(train_x[start: end])
                     batch_y = np.array(train_y[start: end])
-                    epoch_cost, acu, steps, _ = sess.run([self.cost, self.accuracy, self.global_step, self.optimizer], feed_dict={self.input: batch_x, self.output: batch_y})
+                    epoch_cost, epoch_accuracy, steps, _ = sess.run([self.cost, self.accuracy, self.global_step, self.optimizer], feed_dict={self.input: batch_x, self.output: batch_y})
                     loss += epoch_cost
                     if steps % 100 == 0:
-                        saver.save(sess, "", global_step=steps)
-                print("Epoch {0}: completed out of {1} | loss: {2}".format(epoch, FLAGS.num_epochs, epoch_cost))
+                        saver.save(sess, FLAGS.model_dir, global_step=steps)
+                print("Epoch {0}: completed out of {1} | loss: {2} | accuracy: {3}".format(epoch, FLAGS.num_epochs, epoch_cost, epoch_accuracy))
 
             
             correct = tf.equal(tf.argmax(self.prediction, 1), tf.argmax(self.output, 1))
@@ -109,7 +115,12 @@ class CNNModel:
 
 def main():
     # read file
-    dset = Dataset("")
+    init_flags()
+    dataset_spec = {
+        "label": tf.int32,
+        "*": tf.int32
+    }
+    dset = Dataset("./data/train.csv", dataset_spec)
     cnn = CNNModel()
     cnn.train(dset.train_x, dset.train_y, dset.test_x, dset.test_y)
     cnn.predict()
